@@ -195,15 +195,16 @@ class Blockchain {
      */
      getStarsByWalletAddress(address) {
         let self = this;
-        let stars = [];
         return new Promise((resolve, reject) => {
-            self.chain.forEach(block => {
-                let blockData = block.getBData();
-                if (blockData && blockData.owner === address) {
-                    stars.push(blockData);
-                }
-            });
-            resolve(stars);
+            Promise.all(self.chain.map(bl => bl.getBData()))
+                .then(result => {
+                    const stars = result
+                        .filter(bl => bl && bl.owner === address)
+                        .map(bl => bl.star);
+
+                    resolve(stars);
+                })
+                .catch(error => reject(error));
         });
     }
 
@@ -216,17 +217,32 @@ class Blockchain {
      validateChain() {
         let self = this;
         let errorLog = [];
-        return new Promise(async (resolve, reject) => {
-            let block = self.chain[self.height];
-            while (block) {
-                let validBlock = await block.validate();
-                if (validBlock == false) {
-                    errorLog.push('block is invalid' + block.hash)
+        return new Promise((resolve) => {
+            let promisesValidation = [];
+            self.chain.forEach((block, id) => {
+                if (block.height > 0) {
+                    let previousBlock = self.chain[id - 1];
+                    if (block.previousBlockHash !== previousBlock.hash) {
+                        const errorMessage = `Block ${id} previousBlockHash set to ${block.previousBlockHash} which is not equal to ${previousBlock.hash}`;
+                        errorLog.push(errorMessage);
+                    }
                 }
-                block = await self.getBlockByHash(block.previousBlockHash);
-            }
-            resolve(errorLog);
+                promisesValidation.push(block.validate());
+            });
+            Promise.all(promisesValidation)
+                .then(blocksValidation => {
+                    blocksValidation.forEach((validBlock, id) => {
+                        if (!validBlock) {
+                            let blockInvalid = self.chain[id];
+                            let errorMessage = `Block ${id} with hash (${blockInvalid.hash}) is invalid block`;
+                            errorLog.push(errorMessage);
+                        }
+                    });
+
+                    resolve(errorLog);
+                });
         });
+
     }
 
 }
